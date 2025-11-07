@@ -1,0 +1,653 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Neon Dodger - Cursor Survival</title>
+<style>
+  /* -----------------------
+     Neon Dodger - Styles
+  */
+  html,body {
+    height:100%;
+    margin:0;
+    background: radial-gradient(circle at 10% 10%, #07102a 0%, #000 60%);
+    color:#e6f2ff;
+    font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    overflow: hidden;
+    cursor: none;
+  }
+  #game {
+    display:block;
+    margin:20px auto;
+    border-radius:12px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.6), inset 0 0 60px rgba(0,120,255,0.02);
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.03));
+    position:relative;
+  }
+  canvas {
+    display:block;
+    border-radius:12px;
+    background:
+      repeating-linear-gradient(0deg, rgba(255,255,255,0.02) 0px, rgba(255,255,255,0.01) 1px, transparent 2px),
+      linear-gradient(180deg, rgba(3,6,23,0.6), rgba(0,0,0,0.85));
+  }
+
+  .overlay {
+    position:absolute;
+    top:10px;
+    left:12px;
+    z-index:2;
+    background:rgba(0,0,0,0.25);
+    padding:8px 12px;
+    border-radius:8px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.6);
+    backdrop-filter: blur(6px);
+  }
+  .overlay .title {
+    letter-spacing:0.08em;
+    font-weight:700;
+    font-size:14px;
+    color:#9be6ff;
+  }
+  .overlay .score {
+    margin-top:6px;
+    font-weight:600;
+    color:#fff;
+    font-size:13px;
+  }
+
+  #hud-right {
+    position:absolute;
+    top:12px;
+    right:12px;
+    z-index:2;
+    background:rgba(0,0,0,0.18);
+    padding:8px 12px;
+    border-radius:8px;
+  }
+  #hud-right .stat { font-size:13px; color:#fff; font-weight:600; }
+
+  #controls {
+    position:absolute;
+    bottom:12px;
+    left:50%;
+    transform:translateX(-50%);
+    background:rgba(0,0,0,0.18);
+    padding:8px 12px;
+    border-radius:10px;
+    font-size:13px;
+    color:#d6edff;
+    z-index:2;
+  }
+
+  #message {
+    position:absolute;
+    top:45%;
+    left:50%;
+    transform:translate(-50%, -50%);
+    z-index:3;
+    text-align:center;
+    pointer-events:none;
+  }
+  #message h1 {
+    font-size:42px;
+    margin:0;
+    color:#c8feff;
+    text-shadow: 0 6px 30px rgba(0,200,255,0.08);
+    letter-spacing:0.06em;
+  }
+  #message p { margin:6px 0 0 0; color:#9ad9ff; font-size:16px; }
+
+  button.ui-btn {
+    background:linear-gradient(180deg,#12b0ff,#0080ff);
+    color:white;
+    border:none;
+    padding:8px 14px;
+    border-radius:10px;
+    cursor:pointer;
+    font-weight:700;
+    margin-top:10px;
+    box-shadow: 0 6px 18px rgba(0,120,255,0.22);
+  }
+  small.credit {
+    position:absolute;
+    right:10px; bottom:6px;
+    color:#8db8d6; opacity:0.9; font-size:11px;
+  }
+
+  /* make canvas fill a large portion on wide screens */
+  @media(min-width:900px){
+    #game { width: 960px; height: 640px; }
+  }
+  @media(max-width:900px){
+    #game { width: calc(100vw - 40px); height: calc((100vw - 40px) * 0.66); }
+  }
+</style>
+</head>
+<body>
+  <div id="game">
+    <canvas id="canvas" width="960" height="640"></canvas>
+
+    <div class="overlay" id="hud-left">
+      <div class="title">NEON DODGER</div>
+      <div class="score" id="score">Time: 0s</div>
+      <div style="font-size:12px;color:#cfeeff;margin-top:6px;">Dots Dodged: <span id="level">0</span></div>
+    </div>
+
+    <div id="hud-right">
+      <div class="stat" id="hp">Lives: 3</div>
+      <div class="stat" id="ammo">Speed: 1.0x</div>
+    </div>
+
+    <div id="controls">Move your cursor to dodge the dots! · Survive as long as possible · Press R to restart</div>
+
+    <div id="message" style="display:none">
+      <h1 id="msg-title">Game Over</h1>
+      <p id="msg-sub">You survived 0 seconds</p>
+      <div id="msg-cta"><button class="ui-btn" id="restartBtn">Play Again</button></div>
+    </div>
+
+    <small class="credit">Made with ♥ — single-file HTML + JS</small>
+  </div>
+
+<script>
+/* ================================
+   Neon Dodger - Cursor Survival Game
+   Based on Neon Runner, transformed into dodging game
+   ================================ */
+
+/* ---------------------------
+   Utilities
+   --------------------------- */
+class Utils {
+  static rand(min, max) { return Math.random() * (max - min) + min; }
+  static randInt(min,max){ return Math.floor(Utils.rand(min,max+1)); }
+  static clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+  static dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+  static angleTo(a,b){ return Math.atan2(b.y-a.y, b.x-a.x); }
+  static dirFromAngle(a){ return {x:Math.cos(a), y:Math.sin(a)}; }
+  static now(){ return performance.now(); }
+}
+
+/* ---------------------------
+   Input handling
+   --------------------------- */
+class Input {
+  constructor(canvas){
+    this.mouse = {x:canvas.width/2, y:canvas.height/2};
+    this.keys = {};
+    
+    canvas.addEventListener('mousemove', (e)=>{
+      const rect = canvas.getBoundingClientRect();
+      this.mouse.x = (e.clientX - rect.left) * (canvas.width / rect.width);
+      this.mouse.y = (e.clientY - rect.top) * (canvas.height / rect.height);
+    });
+    
+    // Add keyboard event listeners for R key
+    window.addEventListener('keydown', (e) => {
+      this.keys[e.key.toLowerCase()] = true;
+    });
+    
+    window.addEventListener('keyup', (e) => {
+      this.keys[e.key.toLowerCase()] = false;
+    });
+  }
+  
+  isKeyPressed(key) {
+    return this.keys[key.toLowerCase()] || false;
+  }
+}
+
+/* ---------------------------
+   Audio manager
+   --------------------------- */
+class AudioManager {
+  constructor(){
+    this.enabled = true;
+    try {
+      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch(e) { this.enabled = false; }
+  }
+  beep(freq = 440, duration = 0.08, type='sine', vol=0.05){
+    if(!this.enabled) return;
+    const s = this.ctx;
+    const o = s.createOscillator();
+    const g = s.createGain();
+    o.type = type;
+    o.frequency.value = freq;
+    g.gain.value = vol;
+    o.connect(g); g.connect(s.destination);
+    o.start();
+    g.gain.exponentialRampToValueAtTime(0.0001, s.currentTime + duration);
+    o.stop(s.currentTime + duration + 0.02);
+  }
+}
+
+/* ---------------------------
+   Particle for effects
+   --------------------------- */
+class Particle {
+  constructor(x,y,dx,dy,life, size=2){
+    this.x=x; this.y=y; this.dx=dx; this.dy=dy;
+    this.life=life; this.maxLife = life; this.size=size;
+  }
+  step(dt){
+    this.x += this.dx * dt;
+    this.y += this.dy * dt;
+    this.life -= dt;
+  }
+  draw(ctx){
+    const t = Utils.clamp(this.life/this.maxLife, 0, 1);
+    ctx.globalAlpha = t;
+    ctx.fillStyle = `rgba(120,220,255,${0.7*t})`;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size * t, 0, Math.PI*2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+}
+
+/* ---------------------------
+   Enemy Dot (the things you dodge)
+   --------------------------- */
+class EnemyDot {
+  constructor(x,y,type='basic',speedMultiplier=1){
+    this.x=x; this.y=y;
+    this.type = type;
+    this.radius = (type==='large'?16: (type==='fast'?8:12));
+    this.speed = (type==='fast'?180: (type==='large'?70:120)) * speedMultiplier;
+    this.alive = true;
+    
+    // Set direction toward center or random
+    const targetX = Game.W/2 + Utils.rand(-100,100);
+    const targetY = Game.H/2 + Utils.rand(-100,100);
+    const ang = Math.atan2(targetY - this.y, targetX - this.x);
+    this.dx = Math.cos(ang);
+    this.dy = Math.sin(ang);
+  }
+
+  update(dt){
+    this.x += this.dx * this.speed * dt;
+    this.y += this.dy * this.speed * dt;
+    
+    // Bounce off walls
+    if(this.x < this.radius || this.x > Game.W - this.radius) this.dx *= -1;
+    if(this.y < this.radius || this.y > Game.H - this.radius) this.dy *= -1;
+    
+    this.x = Utils.clamp(this.x, this.radius, Game.W - this.radius);
+    this.y = Utils.clamp(this.y, this.radius, Game.H - this.radius);
+  }
+
+  draw(ctx){
+    ctx.save();
+    const grad = ctx.createRadialGradient(this.x-this.radius/2, this.y-this.radius/2, 0, this.x, this.y, this.radius);
+    
+    if(this.type==='fast') { 
+      grad.addColorStop(0, '#ff6b6b'); grad.addColorStop(1, '#ff3b3b');
+    } else if(this.type==='large') {
+      grad.addColorStop(0, '#ff8e42'); grad.addColorStop(1, '#ff5e00');
+    } else {
+      grad.addColorStop(0, '#4dabf7'); grad.addColorStop(1, '#339af0');
+    }
+    
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
+    ctx.fill();
+    
+    // Glow effect
+    ctx.shadowColor = ctx.fillStyle;
+    ctx.shadowBlur = 15;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+/* ---------------------------
+   Player (cursor-controlled circle)
+   --------------------------- */
+class Player {
+  constructor(x,y){
+    this.x=x; this.y=y;
+    this.radius = 14;
+    this.lives = 3;
+    this.maxLives = 3;
+    this.alive = true;
+    this.invulnerable = 0;
+    this.survivalTime = 0;
+    this.dotsDodged = 0;
+  }
+
+  step(input, dt, world){
+    // Move directly to cursor position with smooth interpolation
+    const targetX = input.mouse.x;
+    const targetY = input.mouse.y;
+    
+    // Smooth movement (lerp)
+    this.x += (targetX - this.x) * 0.2;
+    this.y += (targetY - this.y) * 0.2;
+    
+    // Keep within bounds
+    this.x = Utils.clamp(this.x, this.radius, Game.W - this.radius);
+    this.y = Utils.clamp(this.y, this.radius, Game.H - this.radius);
+    
+    // Update survival time
+    this.survivalTime += dt;
+    
+    // Invulnerability timer
+    if(this.invulnerable > 0) {
+      this.invulnerable -= dt;
+    }
+    
+    // Collision with enemy dots
+    if(this.invulnerable <= 0) {
+      for(const dot of world.enemyDots){
+        if(!dot.alive) continue;
+        if(Utils.dist(this, dot) < this.radius + dot.radius){
+          this.lives--;
+          this.invulnerable = 2.0; // 2 seconds invulnerability after hit
+          dot.alive = false;
+          world.audio.beep(220,0.15,'sawtooth', 0.08);
+          world.spawnParticles(this.x, this.y, 15);
+          
+          if(this.lives <= 0){
+            this.alive = false;
+          }
+          break;
+        }
+      }
+    }
+    
+    // Count dodged dots (any dot that goes off screen)
+    this.dotsDodged = world.dotsDodged;
+  }
+
+  draw(ctx){
+    ctx.save();
+    
+    // Glow effect
+    if(this.invulnerable > 0) {
+      // Flashing when invulnerable
+      const flash = Math.sin(Utils.now() * 0.02) > 0;
+      ctx.globalAlpha = flash ? 0.6 : 0.3;
+    } else {
+      ctx.globalAlpha = 0.2;
+    }
+    ctx.fillStyle = '#bfefff';
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.radius*1.8, 0, Math.PI*2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // Main player circle
+    ctx.fillStyle = this.invulnerable > 0 ? '#ffff80' : '#bfefff';
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
+    ctx.fill();
+
+    // Lives indicator
+    for(let i = 0; i < this.maxLives; i++) {
+      ctx.fillStyle = i < this.lives ? '#4af' : '#334';
+      ctx.beginPath();
+      ctx.arc(this.x - 20 + i * 12, this.y - 25, 3, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+}
+
+/* ---------------------------
+   World / Game Manager
+   --------------------------- */
+class World {
+  constructor(ctx, audio){
+    this.ctx = ctx;
+    this.audio = audio;
+    this.reset();
+  }
+
+  reset(){
+    this.player = new Player(Game.W/2, Game.H/2);
+    this.enemyDots = [];
+    this.particles = [];
+    this.spawnTimer = 0;
+    this.difficulty = 1.0;
+    this.dotsDodged = 0;
+    this.paused = false;
+    this.lastTime = Utils.now();
+  }
+
+  spawnDot(){
+    const side = Utils.randInt(0,3);
+    let x,y;
+    
+    if(side===0){ x = -20; y = Utils.randInt(0,Game.H); }
+    else if(side===1){ x = Game.W+20; y = Utils.randInt(0,Game.H); }
+    else if(side===2){ x = Utils.randInt(0,Game.W); y = -20; }
+    else { x = Utils.randInt(0,Game.W); y = Game.H+20; }
+    
+    // Choose dot type based on difficulty
+    const r = Math.random();
+    let type = 'basic';
+    if(r < 0.2) type = 'large';
+    else if(r < 0.4) type = 'fast';
+    
+    const dot = new EnemyDot(x,y,type, this.difficulty);
+    this.enemyDots.push(dot);
+  }
+
+  spawnParticles(x,y, n=12){
+    for(let i=0;i<n;i++){
+      const a = Utils.rand(0, Math.PI*2);
+      const s = Utils.rand(40,260);
+      const p = new Particle(x,y, Math.cos(a)*s, Math.sin(a)*s, Utils.rand(0.25,0.8), Utils.rand(1.5,3.5));
+      this.particles.push(p);
+    }
+  }
+
+  step(dt, input){
+    if(this.paused) return;
+    
+    // Step player
+    if(this.player.alive) this.player.step(input, dt, this);
+
+    // Spawn new dots
+    this.spawnTimer -= dt;
+    const spawnRate = Math.max(0.3, 1.0 - this.difficulty * 0.1);
+    if(this.spawnTimer <= 0){
+      this.spawnTimer = spawnRate;
+      this.spawnDot();
+    }
+
+    // Update dots
+    for(const dot of this.enemyDots){
+      if(dot.alive) dot.update(dt);
+    }
+
+    // Update particles
+    for(const p of this.particles) p.step(dt);
+
+    // Remove dots that go far off screen and count as dodged
+    const before = this.enemyDots.length;
+    this.enemyDots = this.enemyDots.filter(dot => {
+      if(dot.alive && 
+         dot.x > -100 && dot.x < Game.W+100 && 
+         dot.y > -100 && dot.y < Game.H+100) return true;
+      this.dotsDodged++;
+      return false;
+    });
+
+    // Clean up particles
+    this.particles = this.particles.filter(p => p.life > 0);
+
+    // Increase difficulty over time
+    this.difficulty = 1.0 + (this.player.survivalTime * 0.02);
+  }
+
+  draw(){
+    const ctx = this.ctx;
+    this.drawBackground();
+
+    // Draw particles
+    for(const p of this.particles) p.draw(ctx);
+
+    // Draw enemy dots
+    for(const dot of this.enemyDots) dot.draw(ctx);
+
+    // Draw player
+    if(this.player.alive) this.player.draw(ctx);
+
+    // Draw trail behind player
+    ctx.save();
+    ctx.globalAlpha = 0.1;
+    ctx.fillStyle = '#bfefff';
+    ctx.beginPath();
+    ctx.arc(this.player.x, this.player.y, this.player.radius * 1.5, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  drawBackground(){
+    const ctx = this.ctx;
+    const t = Utils.now() * 0.001;
+    const spacing = 36;
+    ctx.save();
+    ctx.clearRect(0,0,Game.W,Game.H);
+    ctx.globalAlpha = 0.06;
+    ctx.strokeStyle = '#69a5ff';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    const offsetX = Math.sin(t*0.6)*12, offsetY = Math.cos(t*0.4)*8;
+    for(let x = -spacing + (offsetX%spacing); x < Game.W; x += spacing) {
+      ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, Game.H);
+    }
+    for(let y = -spacing + (offsetY%spacing); y < Game.H; y += spacing) {
+      ctx.moveTo(0, y + 0.5); ctx.lineTo(Game.W, y + 0.5);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+}
+
+/* ---------------------------
+   Game main loop and UI
+   --------------------------- */
+class GameClass {
+  constructor(){
+    this.canvas = document.getElementById('canvas');
+    this.ctx = this.canvas.getContext('2d', { alpha: true });
+    Game.W = this.canvas.width;
+    Game.H = this.canvas.height;
+    this.input = new Input(this.canvas);
+    this.audio = new AudioManager();
+    this.world = new World(this.ctx, this.audio);
+    Game.input = this.input;
+    this.lastFrame = Utils.now();
+    this.running = true;
+    this.paused = false;
+    this.setupUI();
+    this.loop = this.loop.bind(this);
+    requestAnimationFrame(this.loop);
+  }
+
+  setupUI(){
+    this.scoreEl = document.getElementById('score');
+    this.hpEl = document.getElementById('hp');
+    this.levelEl = document.getElementById('level');
+    this.ammoEl = document.getElementById('ammo');
+    this.message = document.getElementById('message');
+    this.msgTitle = document.getElementById('msg-title');
+    this.msgSub = document.getElementById('msg-sub');
+    
+    // Button restart
+    document.getElementById('restartBtn').addEventListener('click', ()=> this.restart());
+    
+    // Keyboard restart (R key)
+    window.addEventListener('keydown', (e)=>{
+      if(e.key.toLowerCase() === 'p') this.togglePause();
+      if(e.key.toLowerCase() === 'r') this.restart();
+    });
+  }
+
+  togglePause(){
+    this.paused = !this.paused;
+    this.world.paused = this.paused;
+    if(this.paused){
+      this.message.style.display = 'block';
+      this.msgTitle.textContent = 'Paused';
+      this.msgSub.textContent = 'Press P to resume or R to restart';
+    } else {
+      this.message.style.display = 'none';
+    }
+  }
+
+  restart(){
+    this.world.reset();
+    this.paused = false;
+    this.world.paused = false;
+    this.message.style.display = 'none';
+    this.audio.beep(800, 0.1, 'sine', 0.05); // Restart sound
+  }
+
+  loop(){
+    const now = Utils.now();
+    let dt = (now - this.lastFrame) / 1000;
+    if(dt > 0.06) dt = 0.06;
+    this.lastFrame = now;
+    
+    // Check for R key press to restart (even during game over)
+    if(this.input.isKeyPressed('r')) {
+      this.restart();
+    }
+    
+    if(!this.paused){
+      this.world.step(dt, this.input);
+      this.updateUI();
+    }
+    
+    this.world.draw();
+    
+    if(!this.world.player.alive){
+      this.ctx.save();
+      this.ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      this.ctx.fillRect(0,0,Game.W,Game.H);
+      this.ctx.fillStyle = '#fff';
+      this.ctx.font = '42px system-ui, -apple-system, "Segoe UI"';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText('GAME OVER', Game.W/2, Game.H/2 - 20);
+      this.ctx.font = '18px system-ui';
+      this.ctx.fillText(`Survived: ${Math.floor(this.world.player.survivalTime)}s · Dots Dodged: ${this.world.player.dotsDodged}`, Game.W/2, Game.H/2 + 14);
+      this.ctx.restore();
+      
+      this.message.style.display = 'block';
+      this.msgTitle.textContent = 'Game Over';
+      this.msgSub.textContent = `Survived: ${Math.floor(this.world.player.survivalTime)}s · Dots Dodged: ${this.world.player.dotsDodged}`;
+    }
+    
+    requestAnimationFrame(this.loop);
+  }
+
+  updateUI(){
+    this.scoreEl.textContent = `Time: ${Math.floor(this.world.player.survivalTime)}s`;
+    this.hpEl.textContent = `Lives: ${this.world.player.lives}`;
+    this.levelEl.textContent = `${this.world.player.dotsDodged}`;
+    this.ammoEl.textContent = `Speed: ${this.world.difficulty.toFixed(1)}x`;
+  }
+}
+
+/* ---------------------------
+   Start
+   --------------------------- */
+const Game = {};
+window.addEventListener('load', ()=>{
+  const g = new GameClass();
+  window.Game = g;
+});
+</script>
+</body>
+</html>
